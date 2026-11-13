@@ -9,3 +9,8 @@ __pycache__/
 !*.tfvars.example
 
 pipeline_output.txt
+.terraform.tfstate.lock.info
+*.tfvars.json
+*.tfplan
+crash.log
+crash.*.log
