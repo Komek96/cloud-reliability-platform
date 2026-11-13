@@ -1,0 +1,68 @@
+name: cloud-reliability-platform
+
+services:
+
+  volume-init:
+    image: alpine:3.20
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - "chown 1000:1000 /data && chmod 700 /data"
+    volumes:
+      - dynamodb-data:/data
+
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    working_dir: /home/dynamodblocal
+    command:
+      - "-jar"
+      - "DynamoDBLocal.jar"
+      - "-sharedDb"
+      - "-dbPath"
+      - "./data"
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+
+  db-init:
+    build: .
+    entrypoint: ["python", "-u", "-m", "app.init_db"]
+    environment:
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: localtest
+      AWS_SECRET_ACCESS_KEY: localtest
+      DYNAMODB_ENDPOINT_URL: http://dynamodb:8000
+      DYNAMODB_TABLE: cloud_reliability_events
+    depends_on:
+      dynamodb:
+        condition: service_started
+
+  app:
+    build: .
+    ports:
+      - "127.0.0.1::8000"
+    environment:
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: localtest
+      AWS_SECRET_ACCESS_KEY: localtest
+      DYNAMODB_ENDPOINT_URL: http://dynamodb:8000
+      DYNAMODB_TABLE: cloud_reliability_events
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  dynamodb-data:
