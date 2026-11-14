@@ -87,3 +87,16 @@ def get_event(event_id: str, table=Depends(get_table)):
         )
 
     return EventRecord.model_validate(result["Item"])
+
+@app.get("/ready")
+def readiness_check(table=Depends(get_table)):
+    """Verify that DynamoDB can serve event reads."""
+    table.get_item(
+        Key={"event_id": "__readiness_probe__"},
+        ConsistentRead=True,
+    )
+
+    return {
+        "status": "ready",
+        "service": "cloud-reliability-platform",
+    }
