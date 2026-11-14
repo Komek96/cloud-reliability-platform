@@ -70,6 +70,64 @@ The persistent Docker volume remained present:
 4. Separating liveness from database readiness would provide
    more useful operational monitoring.
 
+## Live Readiness Fault-Injection Verification
+
+### Objective
+
+Verify that application liveness and database readiness provide
+different operational signals when DynamoDB becomes unavailable.
+
+### Procedure
+
+1. Confirm that both endpoints return HTTP 200 with DynamoDB running.
+2. Verify the historical event is retrievable.
+3. Temporarily pause the DynamoDB Local container.
+4. Request `/health` and `/ready` while the database is paused.
+5. Resume DynamoDB using `docker unpause`.
+6. Verify both endpoints recover and the event remains available.
+
+### Observed Results
+
+| Database state | `/health` | `/ready` | Result |
+|---|---|---|---|
+| Operational | HTTP 200 | HTTP 200 | PASS |
+| Paused | HTTP 200 | HTTP 503 | PASS |
+| Restored | HTTP 200 | HTTP 200 | PASS |
+
+The readiness endpoint returned the following response during
+the database outage:
+
+```json
+{
+  "detail": "Event storage temporarily unavailable"
+}
+```
+
+The API remained alive throughout the simulated outage.
+
+After restoring DynamoDB, the existing event with ID
+`181d7d10-a58b-4e3a-a88c-9ca754aebf01`
+was successfully retrieved.
+
+### Operational Interpretation
+
+- `/health` represents application liveness.
+- `/ready` checks whether DynamoDB can serve a read request.
+- HTTP 503 indicates that database-dependent functionality
+  is temporarily unavailable.
+- The API can remain running while its readiness check fails.
+- The persistent event record survived the database interruption.
+
+### Limitations
+
+This was a manually executed local experiment.
+
+The readiness probe tests DynamoDB read connectivity but does
+not independently verify write capability.
+
+The experiment does not establish automatic failover,
+production availability, or AWS deployment.
+
 ## Scope and Limitations
 
 This was a manually executed local fault-injection experiment.
@@ -83,6 +141,7 @@ the live outage.
 
 ## Next Improvements
 
-- Add a database-aware `/ready` endpoint.
-- Test readiness responses under healthy and failed conditions.
-- Add automated reliability checks to continuous integration.
+- Add structured operational logging and request metrics.
+- Introduce monitoring dashboards and alerting.
+- Automate repeatable container-level fault-injection tests.
+- Refine database error classification and recovery behavior.
