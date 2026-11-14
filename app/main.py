@@ -1,9 +1,29 @@
-from fastapi import FastAPI
+import logging
+
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 app = FastAPI(
     title="Cloud Reliability Platform",
     version="0.1.0",
 )
+
+
+@app.exception_handler(BotoCoreError)
+@app.exception_handler(ClientError)
+async def handle_database_failure(request: Request, exc: Exception):
+    """Return a safe response when DynamoDB operations fail."""
+    logging.getLogger(__name__).error(
+        "Database operation failed: %s",
+        type(exc).__name__,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Event storage temporarily unavailable"},
+    )
 
 
 @app.get("/health")
