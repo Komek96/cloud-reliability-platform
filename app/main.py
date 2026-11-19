@@ -1,4 +1,4 @@
-import logging
+import time
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import FastAPI, Request
@@ -10,14 +10,61 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def log_http_request(request: Request, call_next):
+    """Record HTTP responses with correlation IDs."""
+    request_id = uuid4().hex
+    request.state.request_id = request_id
+
+    started = time.perf_counter()
+    status_code = 500
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        route = request.scope.get("route")
+
+        app_logger.info(
+            "HTTP request completed",
+            extra={
+                "event": "http_request",
+                "request_id": request_id,
+                "method": request.method,
+                "route": getattr(
+                    route, "path", "unmatched"
+                ),
+                "status_code": status_code,
+                "duration_ms": round(
+                    (time.perf_counter() - started) * 1000,
+                    2,
+                ),
+            },
+        )
+
+
 @app.exception_handler(BotoCoreError)
 @app.exception_handler(ClientError)
 async def handle_database_failure(request: Request, exc: Exception):
     """Return a safe response when DynamoDB operations fail."""
-    logging.getLogger(__name__).error(
-        "Database operation failed: %s",
-        type(exc).__name__,
-        exc_info=(type(exc), exc, exc.__traceback__),
+    app_logger.error(
+        "Database dependency failure",
+        extra={
+            "event": "database_failure",
+            "request_id": getattr(
+                request.state, "request_id", None
+            ),
+            "method": request.method,
+            "route": getattr(
+                request.scope.get("route"),
+                "path",
+                "unmatched",
+            ),
+            "status_code": 503,
+            "error_type": type(exc).__name__,
+        },
     )
 
     return JSONResponse(
@@ -40,6 +87,7 @@ from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import get_table
+from app.observability import app_logger
 
 
 class EventCreate(BaseModel):
