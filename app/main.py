@@ -1,8 +1,20 @@
 import time
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from pydantic import BaseModel, Field
+
+from app.db import get_table
+from app.metrics import (
+    HTTP_REQUESTS_TOTAL,
+    HTTP_REQUEST_DURATION_SECONDS,
+    METRICS_REGISTRY,
+)
+from app.observability import app_logger
 
 app = FastAPI(
     title="Cloud Reliability Platform",
@@ -26,6 +38,20 @@ async def log_http_request(request: Request, call_next):
         return response
     finally:
         route = request.scope.get("route")
+        route_path = getattr(route, "path", "unmatched")
+        elapsed_seconds = time.perf_counter() - started
+
+        if route_path != "/metrics":
+            HTTP_REQUESTS_TOTAL.labels(
+                method=request.method,
+                route=route_path,
+                status_code=str(status_code),
+            ).inc()
+
+            HTTP_REQUEST_DURATION_SECONDS.labels(
+                method=request.method,
+                route=route_path,
+            ).observe(elapsed_seconds)
 
         app_logger.info(
             "HTTP request completed",
@@ -33,12 +59,10 @@ async def log_http_request(request: Request, call_next):
                 "event": "http_request",
                 "request_id": request_id,
                 "method": request.method,
-                "route": getattr(
-                    route, "path", "unmatched"
-                ),
+                "route": route_path,
                 "status_code": status_code,
                 "duration_ms": round(
-                    (time.perf_counter() - started) * 1000,
+                    elapsed_seconds * 1000,
                     2,
                 ),
             },
@@ -80,14 +104,13 @@ def health_check():
         "service": "cloud-reliability-platform",
     }
 
-from datetime import datetime, timezone
-from uuid import uuid4
-
-from fastapi import Depends, HTTPException
-from pydantic import BaseModel, Field
-
-from app.db import get_table
-from app.observability import app_logger
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics():
+    """Expose HTTP metrics for Prometheus scraping."""
+    return Response(
+        content=generate_latest(METRICS_REGISTRY),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 
 
 class EventCreate(BaseModel):
