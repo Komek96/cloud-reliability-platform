@@ -1,0 +1,25 @@
+services:
+  prometheus:
+    image: prom/prometheus:v3.13.5
+
+    # Codespaces API and DynamoDB already share this
+    # network namespace. Prometheus joins it too.
+    network_mode: "service:dynamodb"
+
+    depends_on:
+      dynamodb:
+        condition: service_started
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--storage.tsdb.retention.size=512MB"
+      - "--web.listen-address=127.0.0.1:9090"
+
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+volumes:
+  prometheus-data:
